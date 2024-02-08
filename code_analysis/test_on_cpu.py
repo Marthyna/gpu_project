@@ -1,10 +1,8 @@
-import cv2
 from PIL import Image
 from Network import Network
 import torch
 import os
 import time
-from metrics import get_macs_and_params
 
 # Funzione per il caricamento dell'immagine
 def load_image(image_path):

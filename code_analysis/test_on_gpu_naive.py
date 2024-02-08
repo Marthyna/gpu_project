@@ -3,7 +3,6 @@ from Network import Network
 import torch
 import os
 import time
-from metrics import get_macs_and_params
 
 # Funzione per il caricamento dell'immagine
 def load_image(image_path):
@@ -29,7 +28,6 @@ model_architecture = [
 ]
 
 device = "cuda"
-
 model = Network(model_architecture,device)
 model_state_dict = torch.load(trained_model_path, map_location=torch.device(device))
 model.load_state_dict(model_state_dict['model_state_dict'])
@@ -50,4 +48,3 @@ print("Total Inference Time:", inference_time, "seconds")
 id,block,t = model.info_bottleneck()
 print ( f" critical block = {model_architecture[id]}, f_time = {t}s" )
 model.info_time()
-print(model.stem_conv.state_dict())

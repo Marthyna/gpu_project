@@ -1,5 +1,4 @@
 from modalities import * 
-from genotypes import get_connection_dictionary
 from torch import nn
 from torchvision import transforms
 import torch
