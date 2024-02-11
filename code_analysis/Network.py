@@ -81,6 +81,7 @@ class Network( nn.Module ):
 
         # Calcolo del tempo per lo stem_conv
         X = self.stem_conv(X)
+        self.conv_output = X
         stem_conv_time = time.time() - start_time
 
         start_time = time.time()

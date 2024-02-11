@@ -51,3 +51,7 @@ print("Total Inference Time:", inference_time, "seconds")
 id,block,t = model.info_bottleneck()
 print ( f" critical_block = {model_architecture[id]}, time = {t}s" )
 model.info_time()
+
+with open("actual_output.txt", "w") as conv_output:
+    print(model.conv_output, file = conv_output)
+    print(model.conv_output.shape, file = conv_output)
