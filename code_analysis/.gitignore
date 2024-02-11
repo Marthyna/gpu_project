@@ -1,0 +1,5 @@
+# Ignora tutte le cartelle che iniziano con un punto
+.*/
+
+# Ignora tutte le cartelle che iniziano con un underscore
+_*/
