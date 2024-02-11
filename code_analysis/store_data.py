@@ -53,15 +53,15 @@ print(preprocessed_image.shape)
 # Salva i parametri di stem_convolution in un file di testo in un formato leggibile per C++
 stem_conv_params = model.stem_conv.state_dict()
 for name, param in stem_conv_params.items():
-    if 'weight' in name:
         # Salva i tensori in formato leggibile per C++
-        with open(name + ".txt", 'w') as f:
-            if len(param.size()) == 4:
-                for channel in param:
-                    for matrix in channel:
-                        np.savetxt(f, matrix.numpy(), fmt='%f')
-                    f.write('\n')
-            else:
-                np.savetxt(f, param.numpy(), fmt='%f')
+        if name != "1.num_batches_tracked":
+            with open(name + ".txt", 'w') as f:
+                if len(param.size()) == 4:
+                    for channel in param:
+                        for matrix in channel:
+                            np.savetxt(f, matrix.numpy(), fmt='%f')
+                        f.write('\n')
+                else:
+                    np.savetxt(f, param.numpy(), fmt='%f')
 
 # print (stem_conv_params)
