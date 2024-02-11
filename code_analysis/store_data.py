@@ -1,19 +1,27 @@
 import torch
-import torchvision.transforms as transforms
-from Network import Network
-from PIL import Image
+import numpy as np
 import os
+from PIL import Image
+from Network import Network
+from torchvision import transforms
 
-# Definisci la funzione per il preprocessing dell'immagine
-def preprocess_image(image_path):
-    transform = transforms.Compose([
-        transforms.Resize(128, antialias=True),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-    ])
+
+# Funzione per il caricamento dell'immagine
+def load_image(image_path):
     image = Image.open(image_path)
-    preprocessed_image = transform(image).unsqueeze(0)
-    return preprocessed_image
+    return image
+
+
+# Funzione per il preprocessing dell'immagine
+def preprocess(image : Image.Image):
+    transform = transforms.Compose([
+        transforms.PILToTensor(),
+        transforms.ConvertImageDtype( dtype = torch.float ),
+        transforms.Resize(128,antialias=True),
+        transforms.Normalize(mean = [0.485, 0.456, 0.406], std = [0.229, 0.224, 0.225] )
+    ])
+    X = transform(image).unsqueeze(0)
+    return X
 
 # Definisci il percorso dell'immagine e del modello
 current_directory = os.path.dirname(os.path.abspath(__file__))
@@ -33,10 +41,27 @@ model_state_dict = torch.load(model_path, map_location=torch.device(device))
 model.load_state_dict(model_state_dict['model_state_dict'])
 
 # Preprocessa l'immagine
-preprocessed_image = preprocess_image(image_path)
+preprocessed_image = preprocess(load_image(image_path))
 
-# Salva l'immagine preprocessata
-torch.save(preprocessed_image, "preprocessed_image.pth")
+# Salva l'immagine preprocessata in un file di testo in un formato leggibile per C++
+with open("preprocessed_image.txt", 'w') as f:
+    for channel in preprocessed_image:
+        for row in channel:
+            np.savetxt(f, row.numpy(), fmt='%f')
+print(preprocessed_image.shape)
 
-# Salva lo stato della stem_conv
-torch.save(model.stem_conv.state_dict(), "stem_conv_state_dict.pth")
+# Salva i parametri di stem_convolution in un file di testo in un formato leggibile per C++
+stem_conv_params = model.stem_conv.state_dict()
+for name, param in stem_conv_params.items():
+    if 'weight' in name:
+        # Salva i tensori in formato leggibile per C++
+        with open(name + ".txt", 'w') as f:
+            if len(param.size()) == 4:
+                for channel in param:
+                    for matrix in channel:
+                        np.savetxt(f, matrix.numpy(), fmt='%f')
+                    f.write('\n')
+            else:
+                np.savetxt(f, param.numpy(), fmt='%f')
+
+# print (stem_conv_params)
