@@ -83,7 +83,7 @@ void loadImageWithPadding(const std::string& fname, float* img, int imgRow, int 
     }
 }
 
-void storeFeatureMap(const std::string& fname, float *output, int outputRow, int outputCol){
+void storeFeatureMap2(const std::string& fname, float *output, int outputRow, int outputCol){
        // Store output    
     std::ofstream outputFile(fname);
     if (!outputFile.is_open()) {
@@ -100,27 +100,22 @@ void storeFeatureMap(const std::string& fname, float *output, int outputRow, int
 
 }
 
+__global__ void gpuMatrixConv3DAtomic(float* image, float* kernel, float* output, int kernel_dim,  int imgRow,int imgCol, int stride){
 
-__global__ void gpuMatrixConv3D(float* image, float* mask, float* result,int imgRow, int imgCol, int imgChannels, int kernel_dims, int outputRow,int outputCol)
-{
-	int row = blockIdx.y * blockDim.y + threadIdx.y;
-	int col = blockIdx.x * blockDim.x + threadIdx.x;
+    int kernel_elm,img_elm,mult;
+    // accesso al kernel (da scrivere ancora in forma cuda)
+    kernel_elm = kernel[threadIdx.z * kernel_dim * kernel_dim + threadIdx.y * kernel_dim + threadIdx.x];
 
-	float sum = 0.0;
+    //accesso all'immagine 
+    img_elm = image[ threadIdx.z  * imgRow * imgCol + (stride* blockIdx.y + threadIdx.y) * imgRow +  stride * blockIdx.x + threadIdx.x];
 
-	if (row < outputRow && col < outputCol)
-	{
-		int imageRowsCols = imgRow * imgCol;
+    // moltiplicazione elemento per elemento
+    mult = img_elm * kernel_elm;
 
-		for (int maskRow = 0; maskRow < kernel_dims; maskRow++) {
-			for (int maskCol = 0; maskCol < kernel_dims; maskCol ++) {
-				for (int dep = 0; dep < kernel_dims; dep++)
-            	sum += image[(row + maskRow) * imgCol + col + maskCol + dep * imageRowsCols] * mask[maskRow * kernel_dims + maskCol + dep * kernel_dims];
-			}
-		}
-		result[row * outputCol + col] = sum;
-	}
+    // RACE CONDITION! Per scrivere sull'output, serve un operazione ATOMICA!
+    atomicAdd(&output[blockIdx.y * blockDim.x + blockIdx.x], mult);
 }
+
 
 void printImageWithPadding(const std::string& fname, float* img, int imgRow, int imgCol, int imgChannels) {
     std::ofstream outFile(fname);
@@ -190,23 +185,18 @@ int main() {
     cudaMemcpy(d_means, means, sizeof(float) * kernel_channels, cudaMemcpyHostToDevice);
     cudaMemcpy(d_variances, variances, sizeof(float) * kernel_channels, cudaMemcpyHostToDevice);
 
-    // get the kernel ready
-    int threadsPerBlock = 32; //TODO: tune
-
-    int gridCols = ceil(float(outputCol) / float(threadsPerBlock));
-    int gridRows = ceil(float(outputRow) / float(threadsPerBlock));
-
-    dim3 gridDim(gridCols, gridRows);
-    dim3 blockDim(threadsPerBlock, threadsPerBlock); 
+    
+    dim3 gridDim(outputCol, outputRow);
+    dim3 blockDim(3, 3, 3); 
     
     // kernel call
-    gpuMatrixConv3D<<<gridDim, blockDim>>>(d_image, d_kernel, d_output, imgRow, imgCol, imgChannels, kernel_dims, outputRow, outputCol);
+    gpuMatrixConv3DAtomic<<<gridDim, blockDim>>>(d_image, d_kernel, d_output, kernel_dims, imgRow,imgCol, 2);
 
     // store output on host (CPU)
     cudaMemcpy(output, d_output, sizeof(float) * outputRow * outputCol, cudaMemcpyDeviceToHost);
 
     // store feature map
-    storeFeatureMap("featuremap.txt", output, outputRow, outputCol);
+    storeFeatureMap2("nonpuoentrare.txt", output, outputRow, outputCol);
 
     cudaFree(d_image);
     cudaFree(d_output);
