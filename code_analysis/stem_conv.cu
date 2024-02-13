@@ -2,6 +2,8 @@
 #include <assert.h>
 #include <stdlib.h>
 #include <cuda_runtime_api.h>	
+#include <chrono>
+
 
 // Funzione per calcolare il tempo di esecuzione di un kernel CUDA
 float elapsedTime(cudaEvent_t start, cudaEvent_t stop) {
@@ -74,8 +76,13 @@ int main() {
     outputCol = (imgCol +2*padding - kernel_dims)/stride +1;
     float *output = (float*)malloc(sizeof(float) * output_channels * outputRow * outputCol);
 
-    // padding. It will be added to the overall computational time.
-    image = imgPadding(image,imgRow, imgCol, imgChannels, padding);
+    // padding
+    auto startPadding = std::chrono::high_resolution_clock::now();
+    image = imgPadding(image, imgRow, imgCol, imgChannels, padding);
+    auto endPadding = std::chrono::high_resolution_clock::now();
+    // Calcola la durata dell'operazione di padding
+    std::chrono::duration<float> durationPadding = endPadding - startPadding;
+    float paddingDuration_ms = durationPadding.count()*1000;
 
     // Final allocation check
     if (image == NULL || kernel == NULL || output == NULL) {
@@ -144,9 +151,12 @@ int main() {
     float overall = elapsedTime(start, stop);
     float conv = elapsedTime(start_conv, stop_conv);
     float shift = elapsedTime(start_shift, stop_shift);
-    std::cout << " Shift time: " << shift << " ms" << std::endl;
-    std::cout << " Conv time: " << conv << " ms" << std::endl;
-    std::cout << " Overall time: " << overall << " ms" << std::endl;
+    std::cout << " Padding (seq.) = " << paddingDuration_ms << " ms" << std::endl;
+    std::cout << " Shift = " << shift << " ms" << std::endl;
+    std::cout << " Conv = " << conv << " ms" << std::endl;
+    std::cout << " Overall (cuda) = " << overall << " ms" << std::endl;
+    std::cout << " Overall (stem_convoution) = " << overall + paddingDuration_ms << " ms" << std::endl;
+    
 
     // free cuda memory 
     cudaEventDestroy(start);
