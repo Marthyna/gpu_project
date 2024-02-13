@@ -1,6 +1,9 @@
 #include <iostream>
 #include <fstream>
 #include <cmath>
+#include <assert.h>
+#include <stdlib.h>
+#include <cuda_runtime_api.h>	
 
 void loadKernel(const std::string& filename, float* kernels, int kernel_dims ) {
     std::ifstream file(filename);
@@ -58,6 +61,20 @@ void loadVariances(const std::string& filename, float* variances, int kernel_cha
     }
 }
 
+void loadWeights(const std::string& filename, float* weights, int kernel_channels) {
+    std::ifstream file(filename);
+    if (!file.is_open()) {
+        std::cerr << "Error opening file " << filename << std::endl;
+        return;
+    }
+    for (int i = 0; i < kernel_channels; ++i) {
+        if (!(file >> weights[i])) {
+            std::cerr << "Error reading file " << filename << std::endl;
+            return;
+        }
+    }
+}
+
 void loadImageWithPadding(const std::string& fname, float* img, int imgRow, int imgCol, int imgChannels) {
     std::ifstream imageFile(fname);
     if (!imageFile.is_open()) {
@@ -100,27 +117,36 @@ void storeFeatureMap(const std::string& fname, float *output, int outputRow, int
 
 }
 
+__global__ void gpuMatrixConv3D(float* image, float* mask, float* weight, float* result, int imageRows, int imageCols, int maskRC, int maskDepth, int resultRows, int resultCols, float* bias, float* mean, float* variance, int strideRows, int strideCols) {
+    int row = blockIdx.y * blockDim.y + threadIdx.y;
+    int col = blockIdx.x * blockDim.x + threadIdx.x;
 
-__global__ void gpuMatrixConv3D(float* image, float* mask, float* result,int imgRow, int imgCol, int imgChannels, int kernel_dims, int outputRow,int outputCol)
-{
-	int row = blockIdx.y * blockDim.y + threadIdx.y;
-	int col = blockIdx.x * blockDim.x + threadIdx.x;
+    if (row < resultRows && col < resultCols) {
+        int imageRowsCols = imageRows * imageCols;
 
-	float sum = 0.0;
+        float sum = 0.0;
 
-	if (row < outputRow && col < outputCol)
-	{
-		int imageRowsCols = imgRow * imgCol;
+        // Convolution operation
+        for (int maskRow = 0; maskRow < maskRC; maskRow++) {
+            for (int maskCol = 0; maskCol < maskRC; maskCol++) {
+                for (int dep = 0; dep < maskDepth; dep++) {
+                    sum += image[(row * strideRows + maskRow) * imageCols + col * strideCols + maskCol + dep * imageRowsCols] * mask[maskRow * maskRC + maskCol + dep * maskDepth*maskDepth];
+                }   
+            }
+        }
 
-		for (int maskRow = 0; maskRow < kernel_dims; maskRow++) {
-			for (int maskCol = 0; maskCol < kernel_dims; maskCol ++) {
-				for (int dep = 0; dep < kernel_dims; dep++)
-            	sum += image[(row + maskRow) * imgCol + col + maskCol + dep * imageRowsCols] * mask[maskRow * kernel_dims + maskCol + dep * kernel_dims];
-			}
-		}
-		result[row * outputCol + col] = sum;
-	}
+        // Batch normalization
+        float normalized_sum = ((sum - mean[0]) / sqrtf(variance[0]))*weight[0] + bias[0];
+
+        // ReLU6 activation
+        float relu6_output = fminf(fmaxf(normalized_sum, 0.0f), 6.0f);
+
+        // Store the result
+        result[row * resultCols + col] = relu6_output;
+    }
 }
+
+
 
 void printImageWithPadding(const std::string& fname, float* img, int imgRow, int imgCol, int imgChannels) {
     std::ofstream outFile(fname);
@@ -144,9 +170,8 @@ void printImageWithPadding(const std::string& fname, float* img, int imgRow, int
 
 
 int main() {
-
     // Dimension declaration and definition
-    int imgRow, imgCol, imgChannels,kernel_channels,kernel_dims, padding,outputRow,outputCol;
+    int imgRow, imgCol, imgChannels,kernel_dims, padding,outputRow,outputCol,kernel_channels;
     kernel_dims = 3;
     kernel_channels = 16;
     padding = 1;
@@ -156,71 +181,72 @@ int main() {
     outputRow = 64;
     outputCol = 96;
 
-    // allocating host variables
-    float *image = new float[imgChannels * imgRow * imgCol];
-    float *kernel = new float[kernel_dims * kernel_dims * kernel_dims];
+    // Allocazione delle variabili host con malloc
+    float *image = (float*)malloc(sizeof(float) * imgChannels * imgRow * imgCol);
+    float *kernel = (float*)malloc(sizeof(float) * kernel_dims * kernel_dims * kernel_dims);
+    float *output = (float*)malloc(sizeof(float) * outputRow * outputCol);
     float *bias = new float[kernel_channels];
     float *means = new float[kernel_channels];
     float *variances = new float[kernel_channels];
-    float *output = new float[outputRow * outputCol];
+    float *weights = new float[kernel_channels];
 
-    // loading values (created through pytorch). Outside the purpouse of the parallelization.
+    // Verifica se l'allocazione di memoria è riuscita
+    if (image == NULL || kernel == NULL || output == NULL) {
+        std::cerr << "Errore nell'allocazione di memoria per le variabili host" << std::endl;
+        // Gestire l'errore come preferisci, ad esempio terminando il programma
+        exit(EXIT_FAILURE);
+    }
+
+    // data load (correct)
     loadImageWithPadding("preprocessed_image.txt", image, imgRow, imgCol, imgChannels); //padding added.
     loadKernel("0.weight.txt", kernel, kernel_dims);
-    loadBias("1.weight.txt", bias, kernel_channels);
+    loadBias("1.bias.txt", bias, kernel_channels);
     loadMeans("1.running_mean.txt", means, kernel_channels);
     loadVariances("1.running_var.txt", variances, kernel_channels);
+    loadWeights("1.weight.txt",weights,kernel_channels);
 
-    // padding check
+    // padding check (correct)
     printImageWithPadding("check_padding.txt", image, imgRow, imgCol, imgChannels);
 
     // allocating cuda variables
-    float *d_image, *d_output, *d_kernel, *d_bias, *d_means, *d_variances;
+    float *d_image, *d_output, *d_kernel,*d_bias, *d_means, *d_variances, *d_weights;
 
     cudaMalloc((void**)&d_image, sizeof(float) * imgChannels * imgRow * imgCol);
-    cudaMalloc((void**)&d_output, sizeof(float) * kernel_channels* outputRow * outputCol); 
     cudaMalloc((void**)&d_kernel, sizeof(float) * kernel_dims * kernel_dims * kernel_dims);
+    cudaMalloc((void**)&d_output, sizeof(float) * outputRow * outputCol); 
     cudaMalloc((void**)&d_bias, sizeof(float) * kernel_channels);
     cudaMalloc((void**)&d_means, sizeof(float) * kernel_channels);
     cudaMalloc((void**)&d_variances, sizeof(float) * kernel_channels);
+    cudaMalloc((void**)&d_weights, sizeof(float) * kernel_channels);
 
     cudaMemcpy(d_image, image, sizeof(float) * imgChannels * imgRow * imgCol, cudaMemcpyHostToDevice);
     cudaMemcpy(d_kernel, kernel, sizeof(float) * kernel_dims * kernel_dims * kernel_dims, cudaMemcpyHostToDevice);
     cudaMemcpy(d_bias, bias, sizeof(float) * kernel_channels, cudaMemcpyHostToDevice);
     cudaMemcpy(d_means, means, sizeof(float) * kernel_channels, cudaMemcpyHostToDevice);
     cudaMemcpy(d_variances, variances, sizeof(float) * kernel_channels, cudaMemcpyHostToDevice);
+     cudaMemcpy(d_weights, weights, sizeof(float) * kernel_channels, cudaMemcpyHostToDevice);
 
-    // get the kernel ready
-    int threadsPerBlock = 32; //TODO: tune
+	//vscc
+	int threadsPerBlock = 32;
 
-    int gridCols = ceil(float(outputCol) / float(threadsPerBlock));
-    int gridRows = ceil(float(outputRow) / float(threadsPerBlock));
+	int gridCols = ceil(float(outputCol) / float(threadsPerBlock));
+	int gridRows = ceil(float(outputRow) / float(threadsPerBlock));
 
-    dim3 gridDim(gridCols, gridRows);
-    dim3 blockDim(threadsPerBlock, threadsPerBlock); 
-    
-    // kernel call
-    gpuMatrixConv3D<<<gridDim, blockDim>>>(d_image, d_kernel, d_output, imgRow, imgCol, imgChannels, kernel_dims, outputRow, outputCol);
+	dim3 gridDim(gridCols, gridRows);
+	dim3 blockDim(threadsPerBlock, threadsPerBlock);
 
-    // store output on host (CPU)
+
+	gpuMatrixConv3D << < gridDim, blockDim >> > (d_image, d_kernel, &d_weights[0] ,d_output, imgRow, imgCol, imgChannels, kernel_dims, outputRow, outputCol,d_bias,d_means,d_variances,2,2);
+    // add synchronization if needed.
+    cudaDeviceSynchronize();
+    // Copy the result back to host
     cudaMemcpy(output, d_output, sizeof(float) * outputRow * outputCol, cudaMemcpyDeviceToHost);
-
+    // add synchronization if needed.
     // store feature map
     storeFeatureMap("featuremap.txt", output, outputRow, outputCol);
 
     cudaFree(d_image);
     cudaFree(d_output);
     cudaFree(d_kernel);
-    cudaFree(d_bias);
-    cudaFree(d_means);
-    cudaFree(d_variances);
-
-    delete[] image;
-    delete[] kernel;
-    delete[] bias;
-    delete[] means;
-    delete[] variances;
-    delete[] output;
-
     return 0;
 }

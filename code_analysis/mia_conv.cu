@@ -84,7 +84,7 @@ void loadImageWithPadding(const std::string& fname, float* img, int imgRow, int 
 }
 
 void storeFeatureMap2(const std::string& fname, float *output, int outputRow, int outputCol){
-       // Store output    
+    std::cout<< fname;
     std::ofstream outputFile(fname);
     if (!outputFile.is_open()) {
         std::cerr << "Error opening output file." << std::endl;
@@ -111,14 +111,14 @@ __global__ void gpuMatrixConv3DAtomic(float* image, float* kernel, float* output
 
     // moltiplicazione elemento per elemento
     mult = img_elm * kernel_elm;
-
+    printf("mult %f\n",mult);
     // RACE CONDITION! Per scrivere sull'output, serve un operazione ATOMICA!
     atomicAdd(&output[blockIdx.y * blockDim.x + blockIdx.x], mult);
 }
 
 
 void printImageWithPadding(const std::string& fname, float* img, int imgRow, int imgCol, int imgChannels) {
-    std::ofstream outFile(fname);
+    std::ofstream outFile(fname); 
     if (!outFile.is_open()) {
         std::cerr << "Error opening output file " << fname << std::endl;
         return;
@@ -143,7 +143,7 @@ int main() {
     // Dimension declaration and definition
     int imgRow, imgCol, imgChannels,kernel_channels,kernel_dims, padding,outputRow,outputCol;
     kernel_dims = 3;
-    kernel_channels = 16;
+    // kernel_channels = 16;
     padding = 1;
     imgRow = 128 + padding*2;
     imgCol = 192 + padding*2;
@@ -154,17 +154,17 @@ int main() {
     // allocating host variables
     float *image = new float[imgChannels * imgRow * imgCol];
     float *kernel = new float[kernel_dims * kernel_dims * kernel_dims];
-    float *bias = new float[kernel_channels];
-    float *means = new float[kernel_channels];
-    float *variances = new float[kernel_channels];
+    // float *bias = new float[kernel_channels];
+    // float *means = new float[kernel_channels];
+    // float *variances = new float[kernel_channels];
     float *output = new float[outputRow * outputCol];
 
     // loading values (created through pytorch). Outside the purpouse of the parallelization.
     loadImageWithPadding("preprocessed_image.txt", image, imgRow, imgCol, imgChannels); //padding added.
     loadKernel("0.weight.txt", kernel, kernel_dims);
-    loadBias("1.weight.txt", bias, kernel_channels);
-    loadMeans("1.running_mean.txt", means, kernel_channels);
-    loadVariances("1.running_var.txt", variances, kernel_channels);
+    // loadBias("1.weight.txt", bias, kernel_channels);
+    // loadMeans("1.running_mean.txt", means, kernel_channels);
+    // loadVariances("1.running_var.txt", variances, kernel_channels);
 
     // padding check
     printImageWithPadding("check_padding.txt", image, imgRow, imgCol, imgChannels);
@@ -173,17 +173,17 @@ int main() {
     float *d_image, *d_output, *d_kernel, *d_bias, *d_means, *d_variances;
 
     cudaMalloc((void**)&d_image, sizeof(float) * imgChannels * imgRow * imgCol);
-    cudaMalloc((void**)&d_output, sizeof(float) * kernel_channels* outputRow * outputCol); 
     cudaMalloc((void**)&d_kernel, sizeof(float) * kernel_dims * kernel_dims * kernel_dims);
-    cudaMalloc((void**)&d_bias, sizeof(float) * kernel_channels);
-    cudaMalloc((void**)&d_means, sizeof(float) * kernel_channels);
-    cudaMalloc((void**)&d_variances, sizeof(float) * kernel_channels);
+    cudaMalloc((void**)&d_output, sizeof(float) * outputRow * outputCol); 
+    // cudaMalloc((void**)&d_bias, sizeof(float) * kernel_channels);
+    // cudaMalloc((void**)&d_means, sizeof(float) * kernel_channels);
+    // cudaMalloc((void**)&d_variances, sizeof(float) * kernel_channels);
 
     cudaMemcpy(d_image, image, sizeof(float) * imgChannels * imgRow * imgCol, cudaMemcpyHostToDevice);
     cudaMemcpy(d_kernel, kernel, sizeof(float) * kernel_dims * kernel_dims * kernel_dims, cudaMemcpyHostToDevice);
-    cudaMemcpy(d_bias, bias, sizeof(float) * kernel_channels, cudaMemcpyHostToDevice);
-    cudaMemcpy(d_means, means, sizeof(float) * kernel_channels, cudaMemcpyHostToDevice);
-    cudaMemcpy(d_variances, variances, sizeof(float) * kernel_channels, cudaMemcpyHostToDevice);
+    // cudaMemcpy(d_bias, bias, sizeof(float) * kernel_channels, cudaMemcpyHostToDevice);
+    // cudaMemcpy(d_means, means, sizeof(float) * kernel_channels, cudaMemcpyHostToDevice);
+    // cudaMemcpy(d_variances, variances, sizeof(float) * kernel_channels, cudaMemcpyHostToDevice);
 
     
     dim3 gridDim(outputCol, outputRow);
@@ -191,7 +191,7 @@ int main() {
     
     // kernel call
     gpuMatrixConv3DAtomic<<<gridDim, blockDim>>>(d_image, d_kernel, d_output, kernel_dims, imgRow,imgCol, 2);
-
+    cudaDeviceSynchronize();
     // store output on host (CPU)
     cudaMemcpy(output, d_output, sizeof(float) * outputRow * outputCol, cudaMemcpyDeviceToHost);
 
@@ -201,15 +201,15 @@ int main() {
     cudaFree(d_image);
     cudaFree(d_output);
     cudaFree(d_kernel);
-    cudaFree(d_bias);
-    cudaFree(d_means);
-    cudaFree(d_variances);
+    // cudaFree(d_bias);
+    // cudaFree(d_means);
+    // cudaFree(d_variances);
 
     delete[] image;
     delete[] kernel;
-    delete[] bias;
-    delete[] means;
-    delete[] variances;
+    // delete[] bias;
+    // delete[] means;
+    // delete[] variances;
     delete[] output;
 
     return 0;

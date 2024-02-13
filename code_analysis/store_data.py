@@ -64,4 +64,4 @@ for name, param in stem_conv_params.items():
                 else:
                     np.savetxt(f, param.numpy(), fmt='%f')
 
-# print (stem_conv_params)
+print (stem_conv_params)

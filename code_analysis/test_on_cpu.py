@@ -55,3 +55,12 @@ model.info_time()
 with open("actual_output.txt", "w") as conv_output:
     print(model.conv_output, file = conv_output)
     print(model.conv_output.shape, file = conv_output)
+
+with open("actual_output_1kernel.txt", "w") as conv_output:
+    for r in model.conv_output[0][0]:
+        for val in r.detach().numpy():
+            print(val, end=" ", file=conv_output)
+        print(file=conv_output)  # Aggiungi un a capo alla fine di ogni riga
+
+    print(model.conv_output[0][0].shape, file = conv_output)
+
