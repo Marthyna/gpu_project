@@ -1,6 +1,4 @@
-#include <iostream>
-#include <fstream>
-#include <cmath>
+#include "device_operations.h"
 #include <assert.h>
 #include <stdlib.h>
 #include <cuda_runtime_api.h>	
@@ -11,144 +9,6 @@ float elapsedTime(cudaEvent_t start, cudaEvent_t stop) {
     cudaEventElapsedTime(&milliseconds, start, stop);
     return milliseconds;
 }
-
-void loadKernels(const std::string& filename, float* kernels, int kernel_dims, int out_channels ) {
-    std::ifstream file(filename);
-    if (!file.is_open()) {
-        std::cerr << "Error opening file " << filename << std::endl;
-        return;
-    }
-    for(int k = 0; k < out_channels; k++) {
-        for (int i = 0; i < kernel_dims * kernel_dims * kernel_dims; ++i) {
-            if (!(file >> kernels[i + k*kernel_dims*kernel_dims*kernel_dims])) {
-                std::cerr << "Error reading file " << filename << std::endl;
-                return;
-            }
-        }
-    }
-}
-
-
-void loadBias(const std::string& filename, float* bias,int output_channels) {
-    std::ifstream file(filename);
-    if (!file.is_open()) {
-        std::cerr << "Error opening file " << filename << std::endl;
-        return;
-    }
-    for (int i = 0; i < output_channels; ++i) {
-        if (!(file >> bias[i])) {
-            std::cerr << "Error reading file " << filename << std::endl;
-            return;
-        }
-    }
-}
-
-void loadMeans(const std::string& filename, float* means,int output_channels) {
-    std::ifstream file(filename);
-    if (!file.is_open()) {
-        std::cerr << "Error opening file " << filename << std::endl;
-        return;
-    }
-    for (int i = 0; i < output_channels; ++i) {
-        if (!(file >> means[i])) {
-            std::cerr << "Error reading file " << filename << std::endl;
-            return;
-        }
-    }
-}
-
-void loadVariances(const std::string& filename, float* variances, int output_channels) {
-    std::ifstream file(filename);
-    if (!file.is_open()) {
-        std::cerr << "Error opening file " << filename << std::endl;
-        return;
-    }
-    for (int i = 0; i < output_channels; ++i) {
-        if (!(file >> variances[i])) {
-            std::cerr << "Error reading file " << filename << std::endl;
-            return;
-        }
-    }
-}
-
-void loadWeights(const std::string& filename, float* weights, int output_channels) {
-    std::ifstream file(filename);
-    if (!file.is_open()) {
-        std::cerr << "Error opening file " << filename << std::endl;
-        return;
-    }
-    for (int i = 0; i < output_channels; ++i) {
-        if (!(file >> weights[i])) {
-            std::cerr << "Error reading file " << filename << std::endl;
-            return;
-        }
-    }
-}
-
-void loadImageWithPadding(const std::string& fname, float* img, int imgRow, int imgCol, int imgChannels) {
-    std::ifstream imageFile(fname);
-    if (!imageFile.is_open()) {
-        std::cerr << "Error opening image file " << fname << std::endl;
-        return;
-    }
-
-    // 0 initialization
-    for (int i = 0; i < imgChannels * imgRow * imgCol; ++i) {
-        img[i] = 0.0f;
-    }
-
-    // Carica i valori dell'immagine originale all'interno del padding
-    for (int channel = 0; channel < imgChannels; ++channel) {
-        for (int i = 1; i < imgRow - 1; ++i) {
-            for (int j = 1; j < imgCol - 1; ++j) {
-                if (!(imageFile >> img[channel * imgCol* imgRow + i * imgCol + j])) {
-                    std::cerr << "Error reading image file " << fname << std::endl;
-                    return;
-                }
-            }
-        }
-    }
-}
-
-void storeFeatureMaps(const std::string& fname, float *output, int outputRow, int outputCol, int out_channels){
-    // Store output    
-    std::ofstream outputFile(fname);
-    if (!outputFile.is_open()) {
-        std::cerr << "Error opening output file." << std::endl;
-        return;
-    }
-
-    for (int c = 0; c< out_channels; c++){
-        outputFile << "Feature map (cuda) #" << c + 1 << std::endl;
-        for (int i = 0; i < outputRow; ++i) {
-            for (int j = 0; j < outputCol; ++j) {
-                outputFile << output[c*outputCol*outputRow + i * outputCol + j] << " ";
-            }
-            outputFile << std::endl;
-        }
-        outputFile << std::endl; 
-    }
-
-}
-
-void printLoadedKernels(const std::string& filename, float* kernels, int kernel_dims, int out_channels) {
-    std::ofstream outputFile(filename);
-    if (!outputFile.is_open()) {
-        std::cerr << "Error opening output file." << std::endl;
-        return;
-    }
-
-    for (int k = 0; k < out_channels; ++k) {
-        outputFile << "Kernel #" << k + 1 << std::endl;
-        for (int i = 0; i < kernel_dims * kernel_dims * kernel_dims; ++i) {
-            outputFile << kernels[i + k * kernel_dims * kernel_dims * kernel_dims] << " ";
-        }
-        outputFile << std::endl;
-    }
-
-    outputFile.close();
-}
-
 
 __global__ void gpuMatrixConv3D(float* image, float* mask, float* weight, float* result, int imageRows, int imageCols, int maskRC, int maskDepth, int resultRows, int resultCols, float* bias, float* mean, float* variance, int strideRows, int strideCols) {
     
@@ -182,71 +42,48 @@ __global__ void gpuMatrixConv3D(float* image, float* mask, float* weight, float*
 }
 
 
-
-void printImageWithPadding(const std::string& fname, float* img, int imgRow, int imgCol, int imgChannels) {
-    std::ofstream outFile(fname);
-    if (!outFile.is_open()) {
-        std::cerr << "Error opening output file " << fname << std::endl;
-        return;
-    }
-
-    for (int channel = 0; channel < imgChannels; ++channel) {
-        for (int i = 0; i < imgRow; ++i) {
-            for (int j = 0; j < imgCol; ++j) {
-                outFile << img[channel * imgCol * imgRow + i * imgCol + j] << " ";
-            }
-            outFile << std::endl;
-        }
-        outFile << std::endl; // Separate channels with an empty line
-    }
-
-    outFile.close();
-}
-
-
 int main() {
     // Dimension declaration and definition
-    int imgRow, imgCol, imgChannels,kernel_dims, padding,outputRow,outputCol,output_channels,stride;
+    int imgRow, imgCol, imgChannels,kernel_dims,padding,outputRow,outputCol,output_channels,stride;
     kernel_dims = 3;
     output_channels = 16;
     padding = 1;
-    imgRow = 128 + padding*2;
-    imgCol = 192 + padding*2;
     imgChannels = 3;
     stride = 2;
     
-    // computing outputRow and outputCol
-    outputRow = 1*((imgRow - kernel_dims)/stride+1);
-    outputCol = 1*((imgCol - kernel_dims)/stride +1);
-
-    // Allocazione delle variabili host con malloc
-    float *image = (float*)malloc(sizeof(float) * imgChannels * imgRow * imgCol);
-    float *kernel = (float*)malloc(sizeof(float) * output_channels * kernel_dims * kernel_dims * kernel_dims);
-    float *output = (float*)malloc(sizeof(float) * output_channels * outputRow * outputCol);
+    // model allocation in HOST (cpu)
+    float *kernel = (float*) malloc(sizeof(float) * output_channels * kernel_dims * kernel_dims * kernel_dims);
     float *bias = new float[output_channels];
     float *means = new float[output_channels];
     float *variances = new float[output_channels];
     float *weights = new float[output_channels];
 
-    // Verifica se l'allocazione di memoria è riuscita
+    // model loading in HOST (cpu). Same whatever the image is.
+    loadKernels("./model/stem_params/0.weight.txt", kernel, kernel_dims, output_channels);
+    loadBatchParams("./model/stem_params/1.bias.txt", bias, output_channels);
+    loadBatchParams("./model/stem_params/1.running_mean.txt", means, output_channels);
+    loadBatchParams("./model/stem_params/1.running_var.txt", variances, output_channels);
+    loadBatchParams("./model/stem_params/1.weight.txt",weights,output_channels);
+
+
+    // loading image...
+    float* image = loadImage("./images_processed/imgtest.txt" ,&imgRow, &imgCol, imgChannels);
+    
+    // computing outputRow and outputCol and then space allocation to store feature maps.
+    outputRow = (imgRow + 2*padding - kernel_dims)/stride +1;
+    outputCol = (imgCol +2*padding - kernel_dims)/stride +1;
+    float *output = (float*)malloc(sizeof(float) * output_channels * outputRow * outputCol);
+
+    // padding. It will be added to the overall computational time.
+    image = imgPadding(image,imgRow, imgCol, imgChannels, padding);
+
+    // Final allocation check
     if (image == NULL || kernel == NULL || output == NULL) {
-        std::cerr << "Errore nell'allocazione di memoria per le variabili host" << std::endl;
-        // Gestire l'errore come preferisci, ad esempio terminando il programma
+        std::cerr << "Allocation (host) error." << std::endl;
         exit(EXIT_FAILURE);
     }
 
-    // data load (correct)
-    loadImageWithPadding("preprocessed_image.txt", image, imgRow, imgCol, imgChannels); //padding added.
-    loadKernels("0.weight.txt", kernel, kernel_dims, output_channels);
-    loadBias("1.bias.txt", bias, output_channels);
-    loadMeans("1.running_mean.txt", means, output_channels);
-    loadVariances("1.running_var.txt", variances, output_channels);
-    loadWeights("1.weight.txt",weights,output_channels);
-
-    // // padding check (correct)
-    // printImageWithPadding("check_padding.txt", image, imgRow, imgCol, imgChannels);
-    // printLoadedKernels("prova_caricamento_kernel.txt", kernel, kernel_dims, output_channels);
-
+    // timer setup
     cudaEvent_t start, stop, start_conv,stop_conv,start_shift,stop_shift;
     cudaEventCreate(&start);
     cudaEventCreate(&stop);
@@ -255,50 +92,50 @@ int main() {
     cudaEventCreate(&start_shift);
     cudaEventCreate(&stop_shift);
 
-    // allocating cuda variables
+    // start to recording time to host -> device
     cudaEventRecord(start);
     cudaEventRecord(start_shift);
 
-
+    // declaring device pointers.
     float *d_image, *d_output, *d_kernel, *d_bias, *d_means, *d_variances, *d_weights;
 
-
-    cudaMalloc((void**)&d_image, sizeof(float) * imgChannels * imgRow * imgCol);
+    // allocating space on the device
+    cudaMalloc((void**)&d_image, sizeof(float) * imgChannels * (imgRow + 2*padding) * (imgCol + 2*padding));
     cudaMalloc((void**)&d_kernel, sizeof(float) * output_channels * kernel_dims * kernel_dims * kernel_dims);
     cudaMalloc((void**)&d_output, sizeof(float) * output_channels * outputRow * outputCol); 
     cudaMalloc((void**)&d_bias, sizeof(float) * output_channels);
     cudaMalloc((void**)&d_means, sizeof(float) * output_channels);
     cudaMalloc((void**)&d_variances, sizeof(float) * output_channels);
     cudaMalloc((void**)&d_weights, sizeof(float) * output_channels);
-
-    cudaMemcpy(d_image, image, sizeof(float) * imgChannels * imgRow * imgCol, cudaMemcpyHostToDevice);
+    
+    // shift
+    cudaMemcpy(d_image, image, sizeof(float) * imgChannels * (imgRow + 2*padding) * (imgCol + 2*padding), cudaMemcpyHostToDevice);
     cudaMemcpy(d_kernel, kernel, sizeof(float) * output_channels * kernel_dims * kernel_dims * kernel_dims, cudaMemcpyHostToDevice);
     cudaMemcpy(d_bias, bias, sizeof(float) * output_channels, cudaMemcpyHostToDevice);
     cudaMemcpy(d_means, means, sizeof(float) * output_channels, cudaMemcpyHostToDevice);
     cudaMemcpy(d_variances, variances, sizeof(float) * output_channels, cudaMemcpyHostToDevice);
     cudaMemcpy(d_weights, weights, sizeof(float) * output_channels, cudaMemcpyHostToDevice);
 
+    //end shift timer.
     cudaEventRecord(stop_shift);
 
-	//vscc
+	//grid setup: to be tuned.
 	int threadsPerBlock = 32;
-
 	int gridCols = ceil(float(outputCol) / float(threadsPerBlock));
 	int gridRows = ceil(float(outputRow) / float(threadsPerBlock));
     int gridChannels = output_channels;
-
 	dim3 gridDim(gridCols, gridRows,gridChannels);
 	dim3 blockDim(threadsPerBlock, threadsPerBlock);
 
-    // Avvia il timer
+    // Start convolution timer
     cudaEventRecord(start_conv);
+    // starting convolution (paralel,gpu)
+	gpuMatrixConv3D << < gridDim, blockDim >> > (d_image, d_kernel, d_weights, d_output, imgRow + 2*padding, imgCol + 2*padding, imgChannels, kernel_dims, outputRow, outputCol,d_bias,d_means,d_variances,stride,stride);
 
-	gpuMatrixConv3D << < gridDim, blockDim >> > (d_image, d_kernel, d_weights, d_output, imgRow, imgCol, imgChannels, kernel_dims, outputRow, outputCol,d_bias,d_means,d_variances,stride,stride);
-
-    // CHECK IF IT IS NEEDED.
+    // waiting cuda get the job done to store.
     cudaDeviceSynchronize();
 
-    // Ferma il timer
+    // end convolution timer
     cudaEventSynchronize(stop_conv);
     cudaEventRecord(stop_conv);
     cudaEventRecord(stop);
@@ -311,15 +148,14 @@ int main() {
     std::cout << " Conv time: " << conv << " ms" << std::endl;
     std::cout << " Overall time: " << overall << " ms" << std::endl;
 
-    // Altri codici rimanenti...
+    // free cuda memory 
     cudaEventDestroy(start);
     cudaEventDestroy(stop);
 
     // Copy the result back to host
     cudaMemcpy(output, d_output, sizeof(float) * output_channels * outputRow * outputCol, cudaMemcpyDeviceToHost);
-    // add synchronization if needed.
     // store feature map
-    storeFeatureMaps("convlution.txt", output, outputRow, outputCol, output_channels);
+    storeConvolution("./test_output/convolution_results/cuda_our.txt", output, outputRow, outputCol, output_channels);
 
     cudaFree(d_image);
     cudaFree(d_output);

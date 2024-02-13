@@ -11,13 +11,13 @@ def load_image(image_path):
 
 # Inizializza il percorso dell'immagine
 current_directory = os.path.dirname(os.path.abspath(__file__))
-image_path = os.path.join(current_directory, "imgtest.jpg")
+image_path = os.path.join(current_directory, "../images/imgtest.jpg")
 
 # Carica l'immagine
 image = load_image(image_path)
 
 # Ottieni il percorso del modello
-trained_model_path = os.path.join(current_directory, "BEST_MODEL_TRAINED.tar")
+trained_model_path = os.path.join(current_directory, "../model/BEST_MODEL_TRAINED.tar")
 
 # Carica il modello precedentemente addestrato
 model_architecture = [
@@ -52,11 +52,7 @@ id,block,t = model.info_bottleneck()
 print ( f" critical_block = {model_architecture[id]}, time = {t*1000} ms" )
 model.info_time()
 
-with open("actual_output.txt", "w") as conv_output:
-    print(model.conv_output, file = conv_output)
-    print(model.conv_output.shape, file = conv_output)
-
-with open("actual_convolution.txt", "w") as conv_output:
+with open("../test_output/convolution_results/cpu_pytorch.txt", "w") as conv_output:
     for i,feature_map in enumerate(model.conv_output[0]):
         print("Feature map #", i +1 ,file=conv_output)
         for r in feature_map:

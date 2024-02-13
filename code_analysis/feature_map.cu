@@ -82,6 +82,13 @@ void loadImageWithPadding(const std::string& fname, float* img, int imgRow, int 
         return;
     }
 
+    // reading of nRows and nCols. In this code we only
+    // focus on make the convolution working.
+    // thus we skip row and cols and we use 
+    // predefined sizes.
+    int skipNRow, skipNCol;
+    imageFile >> skipNRow >> skipNCol;
+
     // 0 initialization
     for (int i = 0; i < imgChannels * imgRow * imgCol; ++i) {
         img[i] = 0.0f;
@@ -190,23 +197,22 @@ int main() {
     float *variances = new float[kernel_channels];
     float *weights = new float[kernel_channels];
 
-    // Verifica se l'allocazione di memoria è riuscita
+    // allocation check
     if (image == NULL || kernel == NULL || output == NULL) {
         std::cerr << "Errore nell'allocazione di memoria per le variabili host" << std::endl;
-        // Gestire l'errore come preferisci, ad esempio terminando il programma
         exit(EXIT_FAILURE);
     }
 
     // data load (correct)
-    loadImageWithPadding("preprocessed_image.txt", image, imgRow, imgCol, imgChannels); //padding added.
-    loadKernel("0.weight.txt", kernel, kernel_dims);
-    loadBias("1.bias.txt", bias, kernel_channels);
-    loadMeans("1.running_mean.txt", means, kernel_channels);
-    loadVariances("1.running_var.txt", variances, kernel_channels);
-    loadWeights("1.weight.txt",weights,kernel_channels);
+    loadImageWithPadding("./images_processed/imgtest.txt", image, imgRow, imgCol, imgChannels); //padding added.
+    loadKernel("./model/stem_params/0.weight.txt", kernel, kernel_dims);
+    loadBias("./model/stem_params/1.bias.txt", bias, kernel_channels);
+    loadMeans("./model/stem_params/1.running_mean.txt", means, kernel_channels);
+    loadVariances("./model/stem_params/1.running_var.txt", variances, kernel_channels);
+    loadWeights("./model/stem_params/1.weight.txt",weights,kernel_channels);
 
     // padding check (correct)
-    printImageWithPadding("check_padding.txt", image, imgRow, imgCol, imgChannels);
+    printImageWithPadding("./test_output/data_load_check/check_padding.txt", image, imgRow, imgCol, imgChannels);
 
     // allocating cuda variables
     float *d_image, *d_output, *d_kernel,*d_bias, *d_means, *d_variances, *d_weights;
@@ -226,7 +232,6 @@ int main() {
     cudaMemcpy(d_variances, variances, sizeof(float) * kernel_channels, cudaMemcpyHostToDevice);
      cudaMemcpy(d_weights, weights, sizeof(float) * kernel_channels, cudaMemcpyHostToDevice);
 
-	//vscc
 	int threadsPerBlock = 32;
 
 	int gridCols = ceil(float(outputCol) / float(threadsPerBlock));
@@ -235,15 +240,12 @@ int main() {
 	dim3 gridDim(gridCols, gridRows);
 	dim3 blockDim(threadsPerBlock, threadsPerBlock);
 
-
 	gpuMatrixConv3D << < gridDim, blockDim >> > (d_image, d_kernel, &d_weights[0] ,d_output, imgRow, imgCol, imgChannels, kernel_dims, outputRow, outputCol,d_bias,d_means,d_variances,2,2);
-    // add synchronization if needed.
     cudaDeviceSynchronize();
     // Copy the result back to host
     cudaMemcpy(output, d_output, sizeof(float) * outputRow * outputCol, cudaMemcpyDeviceToHost);
-    // add synchronization if needed.
     // store feature map
-    storeFeatureMap("featuremap.txt", output, outputRow, outputCol);
+    storeFeatureMap("./test_output/convolution_results/feature_map/cuda_our_feature_map.txt", output, outputRow, outputCol);
 
     cudaFree(d_image);
     cudaFree(d_output);

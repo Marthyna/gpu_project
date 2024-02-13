@@ -25,8 +25,8 @@ def preprocess(image : Image.Image):
 
 # Definisci il percorso dell'immagine e del modello
 current_directory = os.path.dirname(os.path.abspath(__file__))
-image_path = os.path.join(current_directory, "imgtest.jpg")
-model_path = os.path.join(current_directory, "BEST_MODEL_TRAINED.tar")
+image_path = os.path.join(current_directory, "../images/imgtest.jpg")
+model_path = os.path.join(current_directory, "../model/BEST_MODEL_TRAINED.tar")
 
 # Carica il modello
 model_architecture = [
@@ -44,7 +44,8 @@ model.load_state_dict(model_state_dict['model_state_dict'])
 preprocessed_image = preprocess(load_image(image_path))
 
 # Salva l'immagine preprocessata in un file di testo in un formato leggibile per C++
-with open("preprocessed_image.txt", 'w') as f:
+with open("../images_processed/imgtest.txt", 'w') as f:
+    print(preprocessed_image.shape[2],preprocessed_image.shape[3],file=f)
     for channel in preprocessed_image:
         for row in channel:
             np.savetxt(f, row.numpy(), fmt='%f')
@@ -55,7 +56,7 @@ stem_conv_params = model.stem_conv.state_dict()
 for name, param in stem_conv_params.items():
         # Salva i tensori in formato leggibile per C++
         if name != "1.num_batches_tracked":
-            with open(name + ".txt", 'w') as f:
+            with open("../model/stem_params/" + name + ".txt", 'w') as f:
                 if len(param.size()) == 4:
                     for channel in param:
                         for matrix in channel:
@@ -64,4 +65,4 @@ for name, param in stem_conv_params.items():
                 else:
                     np.savetxt(f, param.numpy(), fmt='%f')
 
-print (stem_conv_params)
+# print (stem_conv_params)
