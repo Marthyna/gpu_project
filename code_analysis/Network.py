@@ -121,7 +121,7 @@ class Network( nn.Module ):
 
     def info_time(self):
         for step, time_taken in self.time_records.items():
-            print(f"{step} = {time_taken:.3f} s")
+            print(f"{step} = {time_taken*1000} ms")
 
 
     def block_forward(self, X):

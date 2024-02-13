@@ -47,20 +47,22 @@ prediction, inference_time = predict_image(image)
 prediction, inference_time = predict_image(image)
 # Stampa il risultato della predizione e il tempo impiegato per l'inferenza
 print(f"---------------{model.device}---------------------")
-print("Total Inference Time:", inference_time, "seconds")
+print("Total Inference Time:", inference_time * 1000, "ms")
 id,block,t = model.info_bottleneck()
-print ( f" critical_block = {model_architecture[id]}, time = {t}s" )
+print ( f" critical_block = {model_architecture[id]}, time = {t*1000} ms" )
 model.info_time()
 
 with open("actual_output.txt", "w") as conv_output:
     print(model.conv_output, file = conv_output)
     print(model.conv_output.shape, file = conv_output)
 
-with open("actual_output_1kernel.txt", "w") as conv_output:
-    for r in model.conv_output[0][0]:
-        for val in r.detach().numpy():
-            print(val, end=" ", file=conv_output)
-        print(file=conv_output)  # Aggiungi un a capo alla fine di ogni riga
-
+with open("actual_convolution.txt", "w") as conv_output:
+    for i,feature_map in enumerate(model.conv_output[0]):
+        print("Feature map #", i +1 ,file=conv_output)
+        for r in feature_map:
+            for val in r.detach().numpy():
+                print(val, end=" ", file=conv_output)
+            print(file=conv_output)  # Aggiungi un a capo alla fine di ogni riga
+        print(file=conv_output)
     print(model.conv_output[0][0].shape, file = conv_output)
 

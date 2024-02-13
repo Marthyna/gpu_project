@@ -44,7 +44,7 @@ def predict_image(image):
 prediction, inference_time = predict_image(image)
 # Stampa il risultato della predizione e il tempo impiegato per l'inferenza
 print(f"---------------{model.device}---------------------")
-print("Total Inference Time:", inference_time, "seconds")
+print("Total Inference Time:", inference_time * 1000, "ms")
 id,block,t = model.info_bottleneck()
 print ( f" critical block = {model_architecture[id]}, f_time = {t}s" )
 model.info_time()
