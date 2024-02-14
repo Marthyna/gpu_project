@@ -149,10 +149,14 @@ int main() {
     // Copy the result back to host
     cudaMemcpy(output, d_output, sizeof(float) * output_channels * outputRow * outputCol, cudaMemcpyDeviceToHost);
     // Store feature map
-    storeConvolution("./test_output/convolution_results/cuda_our.txt", output, outputRow, outputCol, output_channels);
+    storeConvolution("./test_output/convolution_results/stem_conv_img_shared.txt", output, outputRow, outputCol, output_channels);
 
-    // cudaFree(d_image);
+    cudaFree(d_image);
     cudaFree(d_output);
     cudaFree(d_kernel);
+    cudaFree(d_weights);
+    cudaFree(d_bias);
+    cudaFree(d_means);
+    cudaFree(d_variances);
     return 0;
 }

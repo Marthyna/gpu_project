@@ -250,5 +250,9 @@ int main() {
     cudaFree(d_image);
     cudaFree(d_output);
     cudaFree(d_kernel);
+    cudaFree(d_weights);
+    cudaFree(d_bias);
+    cudaFree(d_means);
+    cudaFree(d_variances);
     return 0;
 }
