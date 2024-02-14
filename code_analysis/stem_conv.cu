@@ -4,14 +4,6 @@
 #include <cuda_runtime_api.h>	
 #include <chrono>
 
-
-// Funzione per calcolare il tempo di esecuzione di un kernel CUDA
-float elapsedTime(cudaEvent_t start, cudaEvent_t stop) {
-    float milliseconds = 0;
-    cudaEventElapsedTime(&milliseconds, start, stop);
-    return milliseconds;
-}
-
 __global__ void gpuMatrixConv3D(float* image, float* mask, float* result, int imageRows, int imageCols, int maskRC, int maskDepth, int resultRows, int resultCols, float* weight, float* bias, float* mean, float* variance, int strideRows, int strideCols) {
     
 
@@ -24,13 +16,18 @@ __global__ void gpuMatrixConv3D(float* image, float* mask, float* result, int im
     int col = blockIdx.x * blockDim.x + threadIdx.x;
     int channel = blockIdx.z;
 
+    int sharedIdx = 0, imgIdx = 0, maskIdx = 0;
+
     //Load image
-    for (int i = 0 ; i < maskRC; i++){
-        for(int j = 0; j < maskRC; j++){
-            for(int d = 0; d< maskDepth; d++){
-                sharedImage[ d*sharedW*sharedH + (threadIdx.y*strideRows + i)*sharedW + threadIdx.x*strideCols + j] = image[ d*imageRows*imageCols + (row * strideRows + i)*imageCols + col*strideCols + j];
-                    // printf("i = %d , j = %d, d = %d,val = %f \n",j ,sharedImage[ d*sharedW*sharedH + (threadIdx.y*strideRows + i)*sharedW + threadIdx.x*strideCols + j]);
-                // printf("blockDim.y = %d, blockDim.x = %d, threadIdx.y = %d, threadId.x = %d \n",blockDim.y,blockDim.x,threadIdx.y,threadIdx.x);
+    // Avoiding race conditions.
+    int k_r = (threadIdx.y == blockDim.y - 1) ? 0 : 1;
+    int k_c = (threadIdx.x == blockDim.x - 1) ? 0 : 1;
+    for (int i = 0 ; i < maskRC - k_r; i++){
+        for(int j = 0; j < maskRC - k_c; j++){
+            for(int d = 0; d < maskDepth; d++){
+                sharedIdx = d*sharedW*sharedH + (threadIdx.y*strideRows + i)*sharedW + threadIdx.x*strideCols + j;
+                imgIdx = d*imageRows*imageCols + (row * strideRows + i)*imageCols + col*strideCols + j;
+                sharedImage[sharedIdx] = image[imgIdx];
             }
         }
     }
@@ -45,7 +42,9 @@ __global__ void gpuMatrixConv3D(float* image, float* mask, float* result, int im
         for (int maskRow = 0; maskRow < maskRC; maskRow++) {
             for (int maskCol = 0; maskCol < maskRC; maskCol++) {
                 for (int dep = 0; dep < maskDepth; dep++) {
-                    sum += sharedImage[ dep*sharedW*sharedH + (threadIdx.y*strideRows + maskRow)*sharedW + threadIdx.x*strideCols + maskCol]*mask[channel*maskRC*maskRC*maskDepth + dep * maskRC*maskRC + maskRow * maskRC + maskCol];
+                    sharedIdx = dep*sharedW*sharedH + (threadIdx.y*strideRows + maskRow)*sharedW + threadIdx.x*strideCols + maskCol;
+                    maskIdx  = channel*maskRC*maskRC*maskDepth + dep * maskRC*maskRC + maskRow * maskRC + maskCol;
+                    sum += sharedImage[ sharedIdx ]*mask[maskIdx];
                 }   
             }
         }
@@ -62,7 +61,7 @@ __global__ void gpuMatrixConv3D(float* image, float* mask, float* result, int im
 
 int main() {
     // Dimension declaration and definition
-    int imgRow, imgCol, imgChannels,kernel_dims,padding,outputRow,outputCol,output_channels,stride;
+    int imgRow, imgCol, imgChannels,kernel_dims,padding,output_channels,stride;
     kernel_dims = 3;
     output_channels = 16;
     padding = 1;
@@ -88,8 +87,8 @@ int main() {
     float* image = loadImage("./images_processed/imgtest.txt" ,&imgRow, &imgCol, imgChannels);
     
     // computing outputRow and outputCol and then space allocation to store feature maps.
-    outputRow = (imgRow + 2*padding - kernel_dims)/stride +1;
-    outputCol = (imgCol +2*padding - kernel_dims)/stride +1;
+    int outputRow = (imgRow + 2*padding - kernel_dims)/stride +1;
+    int outputCol = (imgCol + 2*padding - kernel_dims)/stride +1;
     float *output = (float*)malloc(sizeof(float) * output_channels * outputRow * outputCol);
 
     // padding
@@ -105,19 +104,6 @@ int main() {
         std::cerr << "Allocation (host) error." << std::endl;
         exit(EXIT_FAILURE);
     }
-
-    // timer setup
-    cudaEvent_t start, stop, start_conv,stop_conv,start_shift,stop_shift;
-    cudaEventCreate(&start);
-    cudaEventCreate(&stop);
-    cudaEventCreate(&start_conv);
-    cudaEventCreate(&stop_conv);
-    cudaEventCreate(&start_shift);
-    cudaEventCreate(&stop_shift);
-
-    // start to recording time to host -> device
-    cudaEventRecord(start);
-    cudaEventRecord(start_shift);
 
     // declaring device pointers.
     float *d_image, *d_output, *d_kernel, *d_bias, *d_means, *d_variances, *d_weights;
@@ -139,19 +125,14 @@ int main() {
     cudaMemcpy(d_variances, variances, sizeof(float) * output_channels, cudaMemcpyHostToDevice);
     cudaMemcpy(d_weights, weights, sizeof(float) * output_channels, cudaMemcpyHostToDevice);
 
-    //end shift timer.
-    cudaEventRecord(stop_shift);
-
-	//grid setup: to be tuned.
-	int threadsPerBlock = 18;
+	//grid setup.
+	int threadsPerBlock = 16;
 	int gridCols = ceil(float(outputCol) / float(threadsPerBlock));
 	int gridRows = ceil(float(outputRow) / float(threadsPerBlock));
     int gridChannels = output_channels;
 	dim3 gridDim(gridCols, gridRows,gridChannels);
 	dim3 blockDim(threadsPerBlock, threadsPerBlock);
 
-    // Start convolution timer
-    cudaEventRecord(start_conv);
     // starting convolution (paralel,gpu)
 	gpuMatrixConv3D << < gridDim, blockDim >> > (d_image, d_kernel, d_output, imgRow + 2*padding, imgCol + 2*padding, kernel_dims, kernel_dims, outputRow, outputCol,d_weights,d_bias,d_means,d_variances,stride,stride);
 
@@ -165,29 +146,9 @@ int main() {
         exit(EXIT_FAILURE);
     }
 
-    // end convolution timer
-    cudaEventSynchronize(stop_conv);
-    cudaEventRecord(stop_conv);
-    cudaEventRecord(stop);
-
-    // Calcola e stampa il tempo di esecuzione
-    float overall = elapsedTime(start, stop);
-    float conv = elapsedTime(start_conv, stop_conv);
-    float shift = elapsedTime(start_shift, stop_shift);
-    std::cout << " Padding (seq.) = " << paddingDuration_ms << " ms" << std::endl;
-    std::cout << " Shift = " << shift << " ms" << std::endl;
-    std::cout << " Conv = " << conv << " ms" << std::endl;
-    std::cout << " Overall (cuda) = " << overall << " ms" << std::endl;
-    std::cout << " Overall (stem_convoution) = " << overall + paddingDuration_ms << " ms" << std::endl;
-    
-
-    // free cuda memory 
-    cudaEventDestroy(start);
-    cudaEventDestroy(stop);
-
     // Copy the result back to host
     cudaMemcpy(output, d_output, sizeof(float) * output_channels * outputRow * outputCol, cudaMemcpyDeviceToHost);
-    // store feature map
+    // Store feature map
     storeConvolution("./test_output/convolution_results/cuda_our.txt", output, outputRow, outputCol, output_channels);
 
     // cudaFree(d_image);
