@@ -80,6 +80,7 @@ int main() {
     auto startPadding = std::chrono::high_resolution_clock::now();
     image = imgPadding(image, imgRow, imgCol, imgChannels, padding);
     auto endPadding = std::chrono::high_resolution_clock::now();
+    
     // Calcola la durata dell'operazione di padding
     std::chrono::duration<float> durationPadding = endPadding - startPadding;
     float paddingDuration_ms = durationPadding.count()*1000;
@@ -136,6 +137,7 @@ int main() {
 
     // Start convolution timer
     cudaEventRecord(start_conv);
+    
     // starting convolution (paralel,gpu)
 	gpuMatrixConv3D << < gridDim, blockDim >> > (d_image, d_kernel, d_weights, d_output, imgRow + 2*padding, imgCol + 2*padding, imgChannels, kernel_dims, outputRow, outputCol,d_bias,d_means,d_variances,stride,stride);
 

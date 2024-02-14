@@ -3,3 +3,6 @@
 
 # Ignora tutte le cartelle che iniziano con un underscore
 _*/
+
+# ignora tutti i file che iniziano con un .
+.*
