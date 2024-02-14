@@ -12,36 +12,52 @@ float elapsedTime(cudaEvent_t start, cudaEvent_t stop) {
     return milliseconds;
 }
 
-__global__ void gpuMatrixConv3D(float* image, float* mask, float* weight, float* result, int imageRows, int imageCols, int maskRC, int maskDepth, int resultRows, int resultCols, float* bias, float* mean, float* variance, int strideRows, int strideCols) {
+__global__ void gpuMatrixConv3D(float* image, float* mask, float* result, int imageRows, int imageCols, int maskRC, int maskDepth, int resultRows, int resultCols, float* weight, float* bias, float* mean, float* variance, int strideRows, int strideCols) {
     
+
+    __shared__ float sharedImage[34*34*3];
+    // __shared__ float sharedMask[3*3*3];  // In a first place, we'll try to paralelize just the image loading.
+    int sharedW,sharedH;
+    sharedW = 2*blockDim.x + maskRC - 1;
+    sharedH = 2*blockDim.y + maskRC - 1;
     int row = blockIdx.y * blockDim.y + threadIdx.y;
     int col = blockIdx.x * blockDim.x + threadIdx.x;
     int channel = blockIdx.z;
 
-    if (row < resultRows && col < resultCols) {
-        int imageRowsCols = imageRows * imageCols;
+    //Load image
+    for (int i = 0 ; i < maskRC; i++){
+        for(int j = 0; j < maskRC; j++){
+            for(int d = 0; d< maskDepth; d++){
+                sharedImage[ d*sharedW*sharedH + (threadIdx.y*strideRows + i)*sharedW + threadIdx.x*strideCols + j] = image[ d*imageRows*imageCols + (row * strideRows + i)*imageCols + col*strideCols + j];
+                    // printf("i = %d , j = %d, d = %d,val = %f \n",j ,sharedImage[ d*sharedW*sharedH + (threadIdx.y*strideRows + i)*sharedW + threadIdx.x*strideCols + j]);
+                // printf("blockDim.y = %d, blockDim.x = %d, threadIdx.y = %d, threadId.x = %d \n",blockDim.y,blockDim.x,threadIdx.y,threadIdx.x);
+            }
+        }
+    }
+            
+    // Synchronize threads to ensure all data is loaded into shared memory
+    __syncthreads();
 
+    if (row < resultRows && col < resultCols) {
         float sum = 0.0;
 
-        // Convolution operation
+        // Convolution operation using data from shared memory
         for (int maskRow = 0; maskRow < maskRC; maskRow++) {
             for (int maskCol = 0; maskCol < maskRC; maskCol++) {
                 for (int dep = 0; dep < maskDepth; dep++) {
-                    sum += image[(row * strideRows + maskRow) * imageCols + col * strideCols + maskCol + dep * imageRowsCols] * mask[maskRow * maskRC + maskCol + dep * maskRC*maskRC + channel*maskRC*maskRC*maskDepth];
+                    sum += sharedImage[ dep*sharedW*sharedH + (threadIdx.y*strideRows + maskRow)*sharedW + threadIdx.x*strideCols + maskCol]*mask[channel*maskRC*maskRC*maskDepth + dep * maskRC*maskRC + maskRow * maskRC + maskCol];
                 }   
             }
         }
-
-        // Batch normalization
-        float normalized_sum = ((sum - mean[channel]) / sqrtf(variance[channel]))*weight[channel] + bias[channel];
-
-        // ReLU6 activation
+        // Batch normalization and ReLU6 activation
+        float normalized_sum = ((sum - mean[channel]) / sqrtf(variance[channel])) * weight[channel] + bias[channel];
         float relu6_output = fminf(fmaxf(normalized_sum, 0.0f), 6.0f);
 
         // Store the result
-        result[channel*resultCols*resultRows + row * resultCols + col] = relu6_output;
+        result[channel * resultCols * resultRows + row * resultCols + col] = relu6_output;
     }
 }
+
 
 
 int main() {
@@ -127,7 +143,7 @@ int main() {
     cudaEventRecord(stop_shift);
 
 	//grid setup: to be tuned.
-	int threadsPerBlock = 32;
+	int threadsPerBlock = 16;
 	int gridCols = ceil(float(outputCol) / float(threadsPerBlock));
 	int gridRows = ceil(float(outputRow) / float(threadsPerBlock));
     int gridChannels = output_channels;
@@ -137,10 +153,17 @@ int main() {
     // Start convolution timer
     cudaEventRecord(start_conv);
     // starting convolution (paralel,gpu)
-	gpuMatrixConv3D << < gridDim, blockDim >> > (d_image, d_kernel, d_weights, d_output, imgRow + 2*padding, imgCol + 2*padding, imgChannels, kernel_dims, outputRow, outputCol,d_bias,d_means,d_variances,stride,stride);
+	gpuMatrixConv3D << < gridDim, blockDim >> > (d_image, d_kernel, d_output, imgRow + 2*padding, imgCol + 2*padding, kernel_dims, kernel_dims, outputRow, outputCol,d_weights,d_bias,d_means,d_variances,stride,stride);
 
     // waiting cuda get the job done to store.
     cudaDeviceSynchronize();
+
+    // Gestione degli errori CUDA
+    cudaError_t cudaError = cudaGetLastError();
+    if (cudaError != cudaSuccess) {
+        std::cerr << "CUDA error: " << cudaGetErrorString(cudaError) << std::endl;
+        exit(EXIT_FAILURE);
+    }
 
     // end convolution timer
     cudaEventSynchronize(stop_conv);
@@ -167,7 +190,7 @@ int main() {
     // store feature map
     storeConvolution("./test_output/convolution_results/cuda_our.txt", output, outputRow, outputCol, output_channels);
 
-    cudaFree(d_image);
+    // cudaFree(d_image);
     cudaFree(d_output);
     cudaFree(d_kernel);
     return 0;
