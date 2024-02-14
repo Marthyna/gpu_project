@@ -128,7 +128,7 @@ int main() {
     cudaEventRecord(stop_shift);
 
 	//grid setup: to be tuned.
-	int threadsPerBlock = 32;
+	int threadsPerBlock = 16;
 	int gridCols = ceil(float(outputCol) / float(threadsPerBlock));
 	int gridRows = ceil(float(outputRow) / float(threadsPerBlock));
     int gridChannels = output_channels;
