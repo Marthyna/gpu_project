@@ -18,26 +18,27 @@ __global__ void gpuMatrixConv3D(float* image, float* mask, float* result, int im
 
     int sharedIdx = 0, imgIdx = 0, maskIdx = 0;
 
-    //Load image
-    // Avoiding race conditions.
-    int k_r = (threadIdx.y == blockDim.y - 1) ? 0 : 1;
-    int k_c = (threadIdx.x == blockDim.x - 1) ? 0 : 1;
-    for (int i = 0 ; i < maskRC - k_r; i++){
-        for(int j = 0; j < maskRC - k_c; j++){
-            for(int d = 0; d < maskDepth; d++){
-                sharedIdx = d*sharedW*sharedH + (threadIdx.y*strideRows + i)*sharedW + threadIdx.x*strideCols + j;
-                imgIdx = d*imageRows*imageCols + (row * strideRows + i)*imageCols + col*strideCols + j;
-                sharedImage[sharedIdx] = image[imgIdx];
+    if (row < resultRows && col < resultCols) {
+
+        //Load image
+        // Avoiding race conditions.
+        int k_r = (threadIdx.y == blockDim.y - 1) ? 0 : 1;
+        int k_c = (threadIdx.x == blockDim.x - 1) ? 0 : 1;
+        for (int i = 0 ; i < maskRC - k_r; i++){
+            for(int j = 0; j < maskRC - k_c; j++){
+                for(int d = 0; d < maskDepth; d++){
+                    sharedIdx = d*sharedW*sharedH + (threadIdx.y*strideRows + i)*sharedW + threadIdx.x*strideCols + j;
+                    imgIdx = d*imageRows*imageCols + (row * strideRows + i)*imageCols + col*strideCols + j;
+                    sharedImage[sharedIdx] = image[imgIdx];
+                }
             }
         }
-    }
-            
-    // Synchronize threads to ensure all data is loaded into shared memory
-    __syncthreads();
+                
+        // Synchronize threads to ensure all data is loaded into shared memory
+        __syncthreads();
 
-    if (row < resultRows && col < resultCols) {
         float sum = 0.0;
-
+        
         // Convolution operation using data from shared memory
         for (int maskRow = 0; maskRow < maskRC; maskRow++) {
             for (int maskCol = 0; maskCol < maskRC; maskCol++) {
