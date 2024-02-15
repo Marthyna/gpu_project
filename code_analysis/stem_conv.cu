@@ -33,11 +33,10 @@ __global__ void gpuMatrixConv3D(float* image, float* mask, float* weight, float*
         }
 
         // Batch normalization
-        float normalized_sum = ((sum - mean[channel]) / sqrtf(variance[channel]))*weight[channel] + bias[channel];
-
+        float normalized_sum = ((sum - mean[channel]) / (sqrtf(variance[channel]) + 0.00001)) * weight[channel] + bias[channel];
         // ReLU6 activation
         float relu6_output = fminf(fmaxf(normalized_sum, 0.0f), 6.0f);
-
+        
         // Store the result
         result[channel*resultCols*resultRows + row * resultCols + col] = relu6_output;
     }
@@ -129,6 +128,9 @@ int main() {
     cudaMemcpy(output, d_output, sizeof(float) * output_channels * outputRow * outputCol, cudaMemcpyDeviceToHost);
     // store feature map
     storeConvolution("./test_output/convolution_results/stem_conv.txt", output, outputRow, outputCol, output_channels);
+
+    // Print padding time
+    std::cout << " Padding (seq.) = " << paddingDuration_ms << " ms" << std::endl;
 
     cudaFree(d_image);
     cudaFree(d_output);

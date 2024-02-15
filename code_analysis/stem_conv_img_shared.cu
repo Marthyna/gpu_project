@@ -48,8 +48,9 @@ __global__ void gpuMatrixConv3D(float* image, float* mask, float* result, int im
                 }   
             }
         }
+        
         // Batch normalization and ReLU6 activation
-        float normalized_sum = ((sum - mean[channel]) / sqrtf(variance[channel])) * weight[channel] + bias[channel];
+        float normalized_sum = ((sum - mean[channel]) / (sqrtf(variance[channel]) + 0.00001 )) * weight[channel] + bias[channel];
         float relu6_output = fminf(fmaxf(normalized_sum, 0.0f), 6.0f);
 
         // Store the result
