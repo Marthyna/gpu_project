@@ -4,39 +4,48 @@
 #include <cuda_runtime_api.h>	
 #include <chrono>
 
-
-// Funzione per calcolare il tempo di esecuzione di un kernel CUDA
-float elapsedTime(cudaEvent_t start, cudaEvent_t stop) {
-    float milliseconds = 0;
-    cudaEventElapsedTime(&milliseconds, start, stop);
-    return milliseconds;
-}
-
 __global__ void gpuMatrixConv3D(float* image, float* mask, float* weight, float* result, int imageRows, int imageCols, int maskRC, int maskDepth, int resultRows, int resultCols, float* bias, float* mean, float* variance, int strideRows, int strideCols) {
     
+    __shared__ float sharedMask[3*3*3];
+
     int row = blockIdx.y * blockDim.y + threadIdx.y;
     int col = blockIdx.x * blockDim.x + threadIdx.x;
     int channel = blockIdx.z;
+    int sharedIdx = 0, maskIdx = 0, imgIdx = 0 ;
 
     if (row < resultRows && col < resultCols) {
+         
+         //Load mask into shared memory
+        if (threadIdx.x < maskRC && threadIdx.y < maskRC){
+            for(int d = 0 ; d < maskDepth; d++ ){
+                sharedIdx = d*maskRC*maskRC + threadIdx.y * maskRC + threadIdx.x;
+                maskIdx =  channel *maskRC*maskRC*maskDepth + d*maskRC*maskRC + threadIdx.y * maskRC + threadIdx.x;
+                sharedMask[sharedIdx] = mask[maskIdx];
+            }
+        } 
+        
+        // Synchronize threads to ensure all data is loaded into shared memory
+        __syncthreads();
         int imageRowsCols = imageRows * imageCols;
-
         float sum = 0.0;
 
         // Convolution operation
         for (int maskRow = 0; maskRow < maskRC; maskRow++) {
             for (int maskCol = 0; maskCol < maskRC; maskCol++) {
                 for (int dep = 0; dep < maskDepth; dep++) {
-                    sum += image[(row * strideRows + maskRow) * imageCols + col * strideCols + maskCol + dep * imageRowsCols] * mask[maskRow * maskRC + maskCol + dep * maskRC*maskRC + channel*maskRC*maskRC*maskDepth];
+                    imgIdx = (row * strideRows + maskRow) * imageCols + col * strideCols + maskCol + dep * imageRowsCols;
+                    maskIdx  = dep * maskRC*maskRC + maskRow * maskRC + maskCol;
+                    sum += image[imgIdx]*sharedMask[maskIdx];
                 }   
             }
         }
 
         // Batch normalization
         float normalized_sum = (sum - mean[channel]) / (sqrtf(variance[channel] + 0.00001 ) ) * weight[channel] + bias[channel];
+
         // ReLU6 activation
         float relu6_output = fminf(fmaxf(normalized_sum, 0.0f), 6.0f);
-        
+
         // Store the result
         result[channel*resultCols*resultRows + row * resultCols + col] = relu6_output;
     }
@@ -127,10 +136,7 @@ int main() {
     // Copy the result back to host
     cudaMemcpy(output, d_output, sizeof(float) * output_channels * outputRow * outputCol, cudaMemcpyDeviceToHost);
     // store feature map
-    storeConvolution("./test_output/convolution_results/stem_conv.txt", output, outputRow, outputCol, output_channels);
-
-    // Print padding time
-    std::cout << " Padding (seq.) = " << paddingDuration_ms << " ms" << std::endl;
+    storeConvolution("./test_output/convolution_results/stem_conv_mask_shared.txt", output, outputRow, outputCol, output_channels);
 
     cudaFree(d_image);
     cudaFree(d_output);

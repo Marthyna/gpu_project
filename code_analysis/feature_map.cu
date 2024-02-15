@@ -5,6 +5,10 @@
 #include <stdlib.h>
 #include <cuda_runtime_api.h>	
 
+// THIS IS AN OLD VERSION. WE CHANGED THE IMAGE INPUT FORMAT AND
+// NOW THE FIRST ROW CONTAINS THE IMAGE SHAPE. 
+// TO MAKE IT RUN, YOU HAVE TO RESTORE THE PROPER VERSION THROUGH GIT.
+
 void loadKernel(const std::string& filename, float* kernels, int kernel_dims ) {
     std::ifstream file(filename);
     if (!file.is_open()) {
@@ -250,5 +254,9 @@ int main() {
     cudaFree(d_image);
     cudaFree(d_output);
     cudaFree(d_kernel);
+    cudaFree(d_weights);
+    cudaFree(d_bias);
+    cudaFree(d_means);
+    cudaFree(d_variances);
     return 0;
 }

@@ -4,43 +4,61 @@
 #include <cuda_runtime_api.h>	
 #include <chrono>
 
-
-// Funzione per calcolare il tempo di esecuzione di un kernel CUDA
-float elapsedTime(cudaEvent_t start, cudaEvent_t stop) {
-    float milliseconds = 0;
-    cudaEventElapsedTime(&milliseconds, start, stop);
-    return milliseconds;
-}
-
-__global__ void gpuMatrixConv3D(float* image, float* mask, float* weight, float* result, int imageRows, int imageCols, int maskRC, int maskDepth, int resultRows, int resultCols, float* bias, float* mean, float* variance, int strideRows, int strideCols) {
+__global__ void gpuMatrixConv3D(float* image, float* mask, float* result, int imageRows, int imageCols, int maskRC, int maskDepth, int resultRows, int resultCols, float* weight, float* bias, float* mean, float* variance, int strideRows, int strideCols) {
     
+
+    __shared__ float sharedImage[34*34*3];
+    // __shared__ float sharedMask[3*3*3];  // In a first place, we'll try to paralelize just the image loading.
+    int sharedW,sharedH;
+    sharedW = 2*blockDim.x + maskRC - 1;
+    sharedH = 2*blockDim.y + maskRC - 1;
     int row = blockIdx.y * blockDim.y + threadIdx.y;
     int col = blockIdx.x * blockDim.x + threadIdx.x;
     int channel = blockIdx.z;
 
+    int sharedIdx = 0, imgIdx = 0, maskIdx = 0;
+
     if (row < resultRows && col < resultCols) {
-        int imageRowsCols = imageRows * imageCols;
+
+        //Load image
+        // Avoiding race conditions.
+        int k_r = (threadIdx.y == blockDim.y - 1) ? 0 : 1;
+        int k_c = (threadIdx.x == blockDim.x - 1) ? 0 : 1;
+        for (int i = 0 ; i < maskRC - k_r; i++){
+            for(int j = 0; j < maskRC - k_c; j++){
+                for(int d = 0; d < maskDepth; d++){
+                    sharedIdx = d*sharedW*sharedH + (threadIdx.y*strideRows + i)*sharedW + threadIdx.x*strideCols + j;
+                    imgIdx = d*imageRows*imageCols + (row * strideRows + i)*imageCols + col*strideCols + j;
+                    sharedImage[sharedIdx] = image[imgIdx];
+                }
+            }
+        }
+                
+        // Synchronize threads to ensure all data is loaded into shared memory
+        __syncthreads();
 
         float sum = 0.0;
-
-        // Convolution operation
+        
+        // Convolution operation using data from shared memory
         for (int maskRow = 0; maskRow < maskRC; maskRow++) {
             for (int maskCol = 0; maskCol < maskRC; maskCol++) {
                 for (int dep = 0; dep < maskDepth; dep++) {
-                    sum += image[(row * strideRows + maskRow) * imageCols + col * strideCols + maskCol + dep * imageRowsCols] * mask[maskRow * maskRC + maskCol + dep * maskRC*maskRC + channel*maskRC*maskRC*maskDepth];
+                    sharedIdx = dep*sharedW*sharedH + (threadIdx.y*strideRows + maskRow)*sharedW + threadIdx.x*strideCols + maskCol;
+                    maskIdx  = channel*maskRC*maskRC*maskDepth + dep * maskRC*maskRC + maskRow * maskRC + maskCol;
+                    sum += sharedImage[ sharedIdx ]*mask[maskIdx];
                 }   
             }
         }
-
-        // Batch normalization
-        float normalized_sum = (sum - mean[channel]) / (sqrtf(variance[channel] + 0.00001 ) ) * weight[channel] + bias[channel];
-        // ReLU6 activation
-        float relu6_output = fminf(fmaxf(normalized_sum, 0.0f), 6.0f);
         
+        // Batch normalization and ReLU6 activation
+        float normalized_sum = (sum - mean[channel]) / (sqrtf(variance[channel] + 0.00001 ) ) * weight[channel] + bias[channel];
+        float relu6_output = fminf(fmaxf(normalized_sum, 0.0f), 6.0f);
+
         // Store the result
-        result[channel*resultCols*resultRows + row * resultCols + col] = relu6_output;
+        result[channel * resultCols * resultRows + row * resultCols + col] = relu6_output;
     }
 }
+
 
 
 int main() {
@@ -61,10 +79,10 @@ int main() {
 
     // model loading in HOST (cpu). Same whatever the image is.
     loadKernels("./model/stem_params/0.weight.txt", kernel, kernel_dims, output_channels);
-    loadBatchParams("./model/stem_params/1.weight.txt",weights,output_channels);
     loadBatchParams("./model/stem_params/1.bias.txt", bias, output_channels);
     loadBatchParams("./model/stem_params/1.running_mean.txt", means, output_channels);
     loadBatchParams("./model/stem_params/1.running_var.txt", variances, output_channels);
+    loadBatchParams("./model/stem_params/1.weight.txt",weights,output_channels);
 
 
     // loading image...
@@ -72,14 +90,13 @@ int main() {
     
     // computing outputRow and outputCol and then space allocation to store feature maps.
     int outputRow = (imgRow + 2*padding - kernel_dims)/stride +1;
-    int outputCol = (imgCol +2*padding - kernel_dims)/stride +1;
+    int outputCol = (imgCol + 2*padding - kernel_dims)/stride +1;
     float *output = (float*)malloc(sizeof(float) * output_channels * outputRow * outputCol);
 
     // padding
     auto startPadding = std::chrono::high_resolution_clock::now();
     image = imgPadding(image, imgRow, imgCol, imgChannels, padding);
     auto endPadding = std::chrono::high_resolution_clock::now();
-    
     // Calcola la durata dell'operazione di padding
     std::chrono::duration<float> durationPadding = endPadding - startPadding;
     float paddingDuration_ms = durationPadding.count()*1000;
@@ -119,18 +136,22 @@ int main() {
 	dim3 blockDim(threadsPerBlock, threadsPerBlock);
 
     // starting convolution (paralel,gpu)
-	gpuMatrixConv3D << < gridDim, blockDim >> > (d_image, d_kernel, d_weights, d_output, imgRow + 2*padding, imgCol + 2*padding, imgChannels, kernel_dims, outputRow, outputCol,d_bias,d_means,d_variances,stride,stride);
+	gpuMatrixConv3D << < gridDim, blockDim >> > (d_image, d_kernel, d_output, imgRow + 2*padding, imgCol + 2*padding, kernel_dims, kernel_dims, outputRow, outputCol,d_weights,d_bias,d_means,d_variances,stride,stride);
 
     // waiting cuda get the job done to store.
     cudaDeviceSynchronize();
 
+    // Gestione degli errori CUDA
+    cudaError_t cudaError = cudaGetLastError();
+    if (cudaError != cudaSuccess) {
+        std::cerr << "CUDA error: " << cudaGetErrorString(cudaError) << std::endl;
+        exit(EXIT_FAILURE);
+    }
+
     // Copy the result back to host
     cudaMemcpy(output, d_output, sizeof(float) * output_channels * outputRow * outputCol, cudaMemcpyDeviceToHost);
-    // store feature map
-    storeConvolution("./test_output/convolution_results/stem_conv.txt", output, outputRow, outputCol, output_channels);
-
-    // Print padding time
-    std::cout << " Padding (seq.) = " << paddingDuration_ms << " ms" << std::endl;
+    // Store feature map
+    storeConvolution("./test_output/convolution_results/stem_conv_img_shared.txt", output, outputRow, outputCol, output_channels);
 
     cudaFree(d_image);
     cudaFree(d_output);
